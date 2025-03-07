@@ -1,104 +1,93 @@
-# FlightPHP Active Record 
-[![Latest Stable Version](http://poser.pugx.org/flightphp/active-record/v)](https://packagist.org/packages/flightphp/active-record)
-[![License](https://poser.pugx.org/flightphp/active-record/license)](https://packagist.org/packages/flightphp/active-record)
-[![PHP Version Require](http://poser.pugx.org/flightphp/active-record/require/php)](https://packagist.org/packages/flightphp/active-record)
-[![Dependencies](http://poser.pugx.org/flightphp/active-record/dependents)](https://packagist.org/packages/flightphp/active-record)
+# FlightPHP Session
+[![Latest Stable Version](http://poser.pugx.org/flightphp/session/v)](https://packagist.org/packages/flightphp/session)
+[![License](https://poser.pugx.org/flightphp/session/license)](https://packagist.org/packages/flightphp/session)
+[![PHP Version Require](http://poser.pugx.org/flightphp/session/require/php)](https://packagist.org/packages/flightphp/session)
+[![Dependencies](http://poser.pugx.org/flightphp/session/dependents)](https://packagist.org/packages/flightphp/session)
 
-An active record is mapping a database entity to a PHP object. Spoken plainly, if you have a users table in your database, you can "translate" a row in that table to a `User` class and a `$user` object in your codebase. See [basic example](#basic-example).
-
-## Basic Example
-
-Let's assume you have the following table:
-
-```sql
-CREATE TABLE users (
-	id INTEGER PRIMARY KEY, 
-	name TEXT, 
-	password TEXT 
-);
-```
-
-Now you can setup a new class to represent this table:
-
-```php
-/**
- * An ActiveRecord class is usually singular
- * 
- * It's highly recommended to add the properties of the table as comments here
- *
- * @property int    $id
- * @property string $name
- * @property string $password
- */ 
-class User extends flight\ActiveRecord {
-	public function __construct($databaseConnection)
-	{
-		parent::__construct($databaseConnection, 'users', [ /* custom values */ ]);
-	}
-}
-```
-
-Now watch the magic happen!
-
-```php
-// for sqlite
-$database_connection = new PDO('sqlite:test.db'); // this is just for example, you'd probably use a real database connection
-
-// for mysql
-$database_connection = new PDO('mysql:host=localhost;dbname=test_db&charset=utf8bm4', 'username', 'password');
-
-// or mysqli
-$database_connection = new mysqli('localhost', 'username', 'password', 'test_db');
-// or mysqli with non-object based creation
-$database_connection = mysqli_connect('localhost', 'username', 'password', 'test_db');
-
-$user = new User($database_connection);
-$user->name = 'Bobby Tables';
-$user->password = password_hash('some cool password');
-$user->insert();
-// or $user->save();
-
-echo $user->id; // 1
-
-$user->name = 'Joseph Mamma';
-$user->password = password_hash('some cool password again!!!');
-$user->insert();
-
-echo $user->id; // 2
-```
-
-And it was just that easy to add a new user! Now that there is a user row in the database, how do you pull it out?
-
-```php
-$user->find(1); // find id = 1 in the database and return it.
-echo $user->name; // 'Bobby Tables'
-```
-
-And what if you want to find all the users?
-
-```php
-$users = $user->findAll();
-```
-
-What about with a certain condition?
-
-```php
-$users = $user->like('name', '%mamma%')->findAll();
-```
-
-See how much fun this is? Let's install it and get started!
+A lightweight, file-based session handler for the Flight framework. It supports non-blocking behavior, optional encryption, and auto-commit functionality. See [basic example](#basic-example).
 
 ## Installation
 
 Simply install with Composer
 
+```bash
+composer require flightphp/session
+```
+
+## Basic Example
+
+Let's see how easy it is to use FlightPHP Session:
+
 ```php
-composer require flightphp/active-record 
+// Create a session instance with default settings
+$session = new flight\Session();
+
+// Store some data
+$session->set('user_id', 123);
+$session->set('username', 'johndoe');
+$session->set('is_admin', false);
+
+// Retrieve data
+echo $session->get('username'); // Outputs: johndoe
+
+// Use a default value if the key doesn't exist
+echo $session->get('preferences', 'default_theme'); // Outputs: default_theme
+
+// Remove a session value
+$session->delete('is_admin');
+
+// Check if a value exists
+if ($session->get('user_id')) {
+    echo 'User is logged in!';
+}
+
+// Clear all session data
+$session->clear();
+```
+
+## Advanced Configuration
+
+You can customize the session handler with various configuration options:
+
+```php
+$session = new flight\Session([
+    'save_path' => '/custom/path/to/sessions', // Custom directory for storing session files
+    'encryption_key' => 'your-secret-32-byte-key', // Enable encryption with a secure key
+    'auto_commit' => true, // Automatically commit session changes on shutdown
+    'start_session' => true, // Start the session automatically
+    'test_mode' => false, // Enable for testing without affecting PHP's session state
+]);
+```
+
+## Session Security
+
+When dealing with sensitive user data, it's recommended to use encryption:
+
+```php
+// Create a session with encryption enabled
+$session = new flight\Session([
+    'encryption_key' => 'a-secure-32-byte-key-for-aes-256-cbc',
+]);
+
+// Now all session data will be automatically encrypted when stored
+$session->set('credit_card', '4111-1111-1111-1111');
+```
+
+## Session Regeneration
+
+For security purposes, you might want to regenerate the session ID periodically:
+
+```php
+// Regenerate the session ID and keep the current session data
+$session->regenerate();
+
+// Regenerate the session ID and delete the old session data
+$session->regenerate(true);
 ```
 
 ## Documentation
 
-Head over to the [documentation page](https://docs.flightphp.com/awesome-plugins/active-record) to learn more about usage and how cool this thing is! :)
+Head over to the [documentation page](https://docs.flightphp.com/awesome-plugins/session) to learn more about usage and how cool this thing is! :)
 
 ## License
 
