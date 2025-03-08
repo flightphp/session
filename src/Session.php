@@ -312,6 +312,16 @@ class Session implements SessionHandlerInterface
     }
 
 	/**
+	 * Retrieve all session data.
+	 *
+	 * @return array An associative array containing all session data.
+	 */
+	public function getAll(): array
+	{
+		return $this->data;
+	}
+
+	/**
 	 * Commits the current session data and writes it to the storage.
 	 *
 	 * This method should be called to ensure that all session data is properly

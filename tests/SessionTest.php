@@ -477,4 +477,26 @@ class SessionTest extends TestCase
         $result = $writeMethod->invoke($session, $sessionId, 'data');
         $this->assertTrue($result);
     }
+
+	public function testGetAll(): void
+	{
+		$session = new Session([
+			'save_path' => $this->tempDir,
+			'encryption_key' => null,
+			'auto_commit' => false,
+			'start_session' => false,
+			'test_mode' => true
+		]);
+
+		$session->set('key1', 'value1');
+		$session->set('key2', 'value2');
+
+		$expectedData = [
+			'key1' => 'value1',
+			'key2' => 'value2'
+		];
+
+		$this->assertEquals($expectedData, $session->getAll());
+	}
+
 }
