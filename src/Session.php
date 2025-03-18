@@ -241,6 +241,7 @@ class Session implements SessionHandlerInterface
 	 * @param int $maxLifetime The maximum lifetime of a session in seconds.
 	 * @return int|false The number of deleted sessions on success, or false on failure.
 	 */
+    #[\ReturnTypeWillChange]
     public function gc($maxLifetime)
 	{
 		$count = 0;
