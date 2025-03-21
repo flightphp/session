@@ -13,12 +13,14 @@ use SessionHandlerInterface;
 class Session implements SessionHandlerInterface
 {
     private string $savePath;
+    private string $prefix;
     private array $data = [];
     private bool $changed = false;
     private ?string $sessionId = null;
     private ?string $encryptionKey = null;
     private bool $autoCommit = true;
     private bool $testMode = false;
+    private bool $inRegenerate = false;
 
     /**
      * Constructor to initialize the session handler.
@@ -34,11 +36,12 @@ class Session implements SessionHandlerInterface
     public function __construct(array $config = [])
     {
         $this->savePath = $config['save_path'] ?? sys_get_temp_dir() . '/flight_sessions';
+        $this->prefix = $config['prefix'] ?? 'sess_';
         $this->encryptionKey = $config['encryption_key'] ?? null;
         $this->autoCommit = $config['auto_commit'] ?? true;
         $startSession = $config['start_session'] ?? true;
         $this->testMode = $config['test_mode'] ?? false;
-        
+
         // Set test session ID if provided
         if ($this->testMode === true && isset($config['test_session_id'])) {
             $this->sessionId = $config['test_session_id'];
@@ -52,7 +55,7 @@ class Session implements SessionHandlerInterface
         // Initialize session handler
         $this->initializeSession($startSession);
     }
-    
+
     /**
      * Initialize the session handler and optionally start the session.
      *
@@ -69,21 +72,19 @@ class Session implements SessionHandlerInterface
             $this->read($this->sessionId); // Load session data for the test session ID
             return; // Skip actual session operations in test mode
         }
-        
+
         // @codeCoverageIgnoreStart
         // Register the session handler only if no session is active yet
         if ($startSession === true && session_status() === PHP_SESSION_NONE) {
             // Make sure to register our handler before calling session_start
             session_set_save_handler($this, true);
-            
+
             // Start the session with proper options
             session_start([
                 'use_strict_mode' => true,
                 'use_cookies' => 1,
                 'use_only_cookies' => 1,
-                'cookie_httponly' => 1,
-                'sid_length' => 48,
-                'sid_bits_per_character' => 6
+                'cookie_httponly' => 1
             ]);
             $this->sessionId = session_id();
         } elseif (session_status() === PHP_SESSION_ACTIVE) {
@@ -98,7 +99,7 @@ class Session implements SessionHandlerInterface
         // @codeCoverageIgnoreEnd
     }
 
-    
+
     /**
      * Open a session.
      *
@@ -131,6 +132,7 @@ class Session implements SessionHandlerInterface
      * @param string $id The session ID.
      * @return string The session data.
      */
+    #[\ReturnTypeWillChange]
     public function read($id): string
     {
         $this->sessionId = $id;
@@ -155,39 +157,27 @@ class Session implements SessionHandlerInterface
 
         // Handle plain data (no encryption)
         if ($prefix === 'P' && $this->encryptionKey === null) {
-            try {
-                $unserialized = unserialize($dataStr);
-                if ($unserialized !== false) {
-                    $this->data = $unserialized;
-                    return '';  // Return empty string to let PHP handle serialization
-                }
-            } catch (\Exception $e) {
-                // Silently handle unserialization errors
+            $unserialized = unserialize($dataStr);
+            if ($unserialized !== false) {
+                $this->data = $unserialized;
+                return '';  // Return empty string to let PHP handle serialization
             }
-            
-            $this->data = [];
-            return '';
         }
 
         // Handle encrypted data
         if ($prefix === 'E' && $this->encryptionKey !== null) {
-            try {
                 $iv = substr($dataStr, 0, 16);
                 $encrypted = substr($dataStr, 16);
                 $decrypted = openssl_decrypt($encrypted, 'AES-256-CBC', $this->encryptionKey, 0, $iv);
 
-                if ($decrypted !== false) {
-                    $unserialized = unserialize($decrypted);
-                    if ($unserialized !== false) {
-                        $this->data = $unserialized;
-                        return '';
-                    }
+            if ($decrypted !== false) {
+                $unserialized = unserialize($decrypted);
+                if ($unserialized !== false) {
+                    $this->data = $unserialized;
+                    return '';
                 }
-            } catch (\Exception $e) {
-                // Silently handle decryption or unserialization errors
             }
         }
-
         // Fail fast: mismatch between prefix and encryption state or corruption
         $this->data = [];
         return '';
@@ -204,11 +194,11 @@ class Session implements SessionHandlerInterface
     {
         $iv = openssl_random_pseudo_bytes(16);
         $encrypted = openssl_encrypt($data, 'AES-256-CBC', $this->encryptionKey, 0, $iv);
-        
+
         if ($encrypted === false) {
             return false; // @codeCoverageIgnore
         }
-        
+
         return 'E' . $iv . $encrypted;
     }
 
@@ -220,7 +210,7 @@ class Session implements SessionHandlerInterface
         // When PHP calls this method, it passes serialized data
         // We ignore this parameter because we maintain our data internally
         // and handle serialization ourselves
-        
+
         // Fail fast: no changes to write
         if ($this->changed === false && empty($this->data) === false) {
             return true;
@@ -232,7 +222,7 @@ class Session implements SessionHandlerInterface
         // Handle encryption if key is provided
         if ($this->encryptionKey !== null) {
             $content = $this->encryptData($serialized);
-            
+
             // Fail fast: encryption failed
             if ($content === false) {
                 return false;
@@ -253,12 +243,27 @@ class Session implements SessionHandlerInterface
      */
     public function destroy($id): bool
     {
-        $file = $this->getSessionFile($id);
-        if (file_exists($file)) {
-            unlink($file);
+        // If we're destroying the current session, clear the data
+        if ($id === $this->sessionId) {
+            $this->data = [];
+            $this->changed = true;
+            $this->autoCommit = false; // Disable auto-commit to prevent writing empty data
+            $this->commit();
+            if ($this->testMode === false && $this->inRegenerate === false && session_status() === PHP_SESSION_ACTIVE) {
+                // Ensure session is closed
+                session_write_close(); // @codeCoverageIgnore
+            }
+            $this->sessionId = null; // Clear session ID
         }
-        $this->data = [];
-        $this->changed = true;
+
+        $file = $this->getSessionFile($id);
+        if (file_exists($file) === true) {
+            $result = unlink($file);
+            if ($result === false) {
+                return false; // @codeCoverageIgnore
+            }
+        }
+
         return true;
     }
 
@@ -276,7 +281,7 @@ class Session implements SessionHandlerInterface
     {
         $count = 0;
         $time = time();
-        $pattern = $this->savePath . '/sess_*';
+        $pattern = $this->savePath . '/' . $this->prefix . '*';
 
         // Get session files; return 0 if glob fails or no files exist
         $files = glob($pattern);
@@ -382,29 +387,34 @@ class Session implements SessionHandlerInterface
     /**
      * Regenerates the session ID.
      *
-     * @param bool $deleteOld Whether to delete the old session data or not.
+     * @param bool $deleteOldFile Whether to delete the old session data or not.
      * @return self Returns the current instance for method chaining.
      */
-    public function regenerate(bool $deleteOld = false): self
+    public function regenerate(bool $deleteOldFile = false): self
     {
         if ($this->sessionId) {
+            $oldId = $this->sessionId;
+            $oldData = $this->data;
+            $this->inRegenerate = true;
+
             if ($this->testMode) {
-                // In test mode, simply generate a new ID without affecting PHP sessions
-                $oldId = $this->sessionId;
+                // In test mode, generate a new ID without affecting PHP sessions
                 $this->sessionId = bin2hex(random_bytes(16));
-                if ($deleteOld) {
-                    $this->destroy($oldId);
-                }
             } else {
                 // @codeCoverageIgnoreStart
-                session_regenerate_id($deleteOld);
-                $newId = session_id();
-                if ($deleteOld) {
-                    $this->destroy($this->sessionId);
-                }
-                $this->sessionId = $newId;
+                session_regenerate_id($deleteOldFile);
+                $this->sessionId = session_id();
                 // @codeCoverageIgnoreEnd
             }
+            $this->inRegenerate = false;
+
+            // Save the current data with the new session ID first
+            if (empty($oldData) === false) {
+                $this->changed = true;
+                $this->data = $oldData;
+                $this->commit();
+            }
+
             $this->changed = true;
         }
         return $this;
@@ -418,6 +428,6 @@ class Session implements SessionHandlerInterface
      */
     private function getSessionFile(string $id): string
     {
-        return $this->savePath . '/sess_' . $id;
+        return $this->savePath . '/' . $this->prefix . $id;
     }
 }
