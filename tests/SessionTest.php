@@ -1,7 +1,10 @@
 <?php
 
+namespace tests;
+
 use flight\Session;
 use PHPUnit\Framework\TestCase;
+use ReflectionClass;
 
 class SessionTest extends TestCase
 {
@@ -54,9 +57,9 @@ class SessionTest extends TestCase
         foreach ($files as $file) {
             if (is_file($file) === true) {
                 unlink($file);
-            } else if (is_dir($file) === true) {
-				$this->deleteDirectory($file);
-			}
+            } elseif (is_dir($file) === true) {
+                $this->deleteDirectory($file);
+            }
         }
         rmdir($dir);
     }
@@ -111,7 +114,7 @@ class SessionTest extends TestCase
             'auto_commit' => false,
             'start_session' => false,
             'test_mode' => true,
-			'test_session_id' => 'test_session_id1234'
+            'test_session_id' => 'test_session_id1234'
         ]); // No encryption, no auto-commit
         $session1->set('key', 'value');
         $session1->commit();
@@ -123,7 +126,7 @@ class SessionTest extends TestCase
             'auto_commit' => false,
             'start_session' => false,
             'test_mode' => true,
-			'test_session_id' => 'test_session_id1234'
+            'test_session_id' => 'test_session_id1234'
         ]);
         $this->assertEquals('value', $session2->get('key'));
     }
@@ -140,7 +143,7 @@ class SessionTest extends TestCase
             'auto_commit' => false,
             'start_session' => false,
             'test_mode' => true,
-			'test_session_id' => 'test_session_id1234'
+            'test_session_id' => 'test_session_id1234'
         ]);
         $session1->set('key', 'secret');
         $session1->commit();
@@ -152,7 +155,7 @@ class SessionTest extends TestCase
             'auto_commit' => false,
             'start_session' => false,
             'test_mode' => true,
-			'test_session_id' => 'test_session_id1234'
+            'test_session_id' => 'test_session_id1234'
         ]);
         $this->assertEquals('secret', $session2->get('key'));
     }
@@ -169,7 +172,7 @@ class SessionTest extends TestCase
             'auto_commit' => true,
             'start_session' => false,
             'test_mode' => true,
-			'test_session_id' => 'test_session_id1234'
+            'test_session_id' => 'test_session_id1234'
         ]);
         $session1->set('key', 'value');
         // No manual commit; simulate shutdown by calling commit() manually
@@ -182,7 +185,7 @@ class SessionTest extends TestCase
             'auto_commit' => false,
             'start_session' => false,
             'test_mode' => true,
-			'test_session_id' => 'test_session_id1234'
+            'test_session_id' => 'test_session_id1234'
         ]);
         $this->assertEquals('value', $session2->get('key'));
     }
@@ -198,28 +201,28 @@ class SessionTest extends TestCase
             'test_mode' => true
         ]);
         $file = $this->tempDir . '/sess_testfile';
-        
+
         // Create an expired session file
         file_put_contents($file, 'Ptest'); // Simple content with 'P' prefix
         touch($file, time() - 3600); // Set file to 1 hour old
-        
+
         $result = $session->gc(1800); // Max lifetime of 30 minutes
         $this->assertEquals(1, $result); // Expect 1 file deleted
         $this->assertFileDoesNotExist($file);
     }
 
-	public function testGarbageCollectionWithEmptyDirectory(): void
-	{
-		$session = new Session([
-			'save_path' => $this->tempDir,
-			'start_session' => false,
-			'test_mode' => true
-		]);
-		
-		// Ensure the directory is empty
-		$result = $session->gc(1800); // Max lifetime of 30 minutes
-		$this->assertEquals(0, $result); // No files to delete
-	}
+    public function testGarbageCollectionWithEmptyDirectory(): void
+    {
+        $session = new Session([
+            'save_path' => $this->tempDir,
+            'start_session' => false,
+            'test_mode' => true
+        ]);
+
+        // Ensure the directory is empty
+        $result = $session->gc(1800); // Max lifetime of 30 minutes
+        $this->assertEquals(0, $result); // No files to delete
+    }
 
     public function testGarbageCollectionWithNoExpiredFiles(): void
     {
@@ -229,11 +232,11 @@ class SessionTest extends TestCase
             'test_mode' => true
         ]);
         $file = $this->tempDir . '/sess_testfile';
-        
+
         // Create a fresh session file
         file_put_contents($file, 'Ptest');
         touch($file, time()); // File is not expired
-        
+
         $result = $session->gc(1800); // Max lifetime of 30 minutes
         $this->assertEquals(0, $result); // No files deleted
         $this->assertFileExists($file);
@@ -259,11 +262,11 @@ class SessionTest extends TestCase
             'test_mode' => true
         ]);
         $file = $this->tempDir . '/sess_testfile';
-        
+
         // Create an expired session file
         file_put_contents($file, 'Ptest');
         touch($file, time() - 3600); // 1 hour old
-        
+
         $result = $session->gc('1800'); // Pass a string instead of int
         $this->assertEquals(1, $result); // Should still work due to PHP's type juggling
         $this->assertFileDoesNotExist($file);
@@ -300,19 +303,19 @@ class SessionTest extends TestCase
             'save_path' => $this->tempDir,
             'test_mode' => true
         ]);
-        
+
         // Using reflection to access these methods since they're normally called by PHP internally
         $reflector = new ReflectionClass($session);
-        
+
         $openMethod = $reflector->getMethod('open');
         $openMethod->setAccessible(true);
         $this->assertTrue($openMethod->invoke($session, $this->tempDir, 'PHPSESSID'));
-        
+
         $closeMethod = $reflector->getMethod('close');
         $closeMethod->setAccessible(true);
         $this->assertTrue($closeMethod->invoke($session));
     }
-    
+
     /**
      * Test the destroy method to ensure it removes session data.
      */
@@ -324,28 +327,28 @@ class SessionTest extends TestCase
             'test_mode' => true,
             'test_session_id' => $sessionId
         ]);
-        
+
         // Create session data
         $session->set('key', 'value');
         $session->commit();
-        
+
         // Verify the file exists
         $sessionFile = $this->tempDir . '/sess_' . $sessionId;
         $this->assertFileExists($sessionFile);
-        
+
         // Use reflection to access destroy method
         $reflector = new ReflectionClass($session);
         $destroyMethod = $reflector->getMethod('destroy');
         $destroyMethod->setAccessible(true);
-        
+
         $result = $destroyMethod->invoke($session, $sessionId);
         $this->assertTrue($result);
         $this->assertFileDoesNotExist($sessionFile);
-        
+
         // Check that internal data was cleared
         $this->assertNull($session->get('key'));
     }
-    
+
     /**
      * Test reading from empty or invalid session files.
      */
@@ -353,31 +356,31 @@ class SessionTest extends TestCase
     {
         $sessionId = 'test_invalid_content';
         $sessionFile = $this->tempDir . '/sess_' . $sessionId;
-        
+
         // Create empty file
         file_put_contents($sessionFile, '');
-        
+
         $session = new Session([
             'save_path' => $this->tempDir,
             'test_mode' => true,
             'test_session_id' => $sessionId
         ]);
-        
+
         // Data should be empty array when file is empty
         $this->assertNull($session->get('any_key'));
-        
+
         // Try with invalid content too short for proper format
         file_put_contents($sessionFile, 'X');
-        
+
         $session2 = new Session([
             'save_path' => $this->tempDir,
             'test_mode' => true,
             'test_session_id' => $sessionId
         ]);
-        
+
         $this->assertNull($session2->get('any_key'));
     }
-    
+
     /**
      * Test mismatch between encryption state and file prefix.
      */
@@ -385,30 +388,30 @@ class SessionTest extends TestCase
     {
         $sessionId = 'test_prefix_mismatch';
         $sessionFile = $this->tempDir . '/sess_' . $sessionId;
-        
+
         // Create file with E prefix but we'll read without encryption key
         $data = serialize(['key' => 'value']);
         file_put_contents($sessionFile, 'E' . str_repeat('0', 16) . 'dummy_encrypted_data');
-        
+
         $session = new Session([
             'save_path' => $this->tempDir,
             'test_mode' => true,
             'test_session_id' => $sessionId
         ]);
-        
+
         // Data should be empty when prefix doesn't match encryption state
         $this->assertNull($session->get('key'));
-        
+
         // Now try P prefix with encryption
         file_put_contents($sessionFile, 'P' . serialize(['key' => 'value']));
-        
+
         $session2 = new Session([
             'save_path' => $this->tempDir,
             'encryption_key' => $this->encryptionKey,
             'test_mode' => true,
             'test_session_id' => $sessionId
         ]);
-        
+
         // Data should be empty when prefix doesn't match encryption state
         $this->assertNull($session2->get('key'));
     }
@@ -420,7 +423,7 @@ class SessionTest extends TestCase
     {
         // We need to mock openssl_encrypt to simulate failure
         $sessionId = 'test_encryption_failure';
-        
+
         // Create a partial mock of the Session class
         $session = $this->getMockBuilder(Session::class)
             ->setConstructorArgs([
@@ -433,60 +436,59 @@ class SessionTest extends TestCase
             ])
             ->onlyMethods(['encryptData'])
             ->getMock();
-            
+
         // Set up the mock to simulate encryption failure
         $session->method('encryptData')->willReturn(false);
-        
+
         // Use reflection to make encryptData accessible and inject it
         $reflector = new ReflectionClass(Session::class);
         $writeMethod = $reflector->getMethod('write');
         $writeMethod->setAccessible(true);
-        
+
         // Set some data and mark as changed
         $session->set('key', 'value');
-        
+
         // Write should return false when encryption fails
         $result = $writeMethod->invoke($session, $sessionId, 'data');
         $this->assertFalse($result);
     }
-    
+
     /**
      * Test write method when no changes were made.
      */
     public function testWriteWithNoChanges(): void
     {
         $sessionId = 'test_no_changes';
-        
+
         $session = new Session([
             'save_path' => $this->tempDir,
             'test_mode' => true,
             'test_session_id' => $sessionId
         ]);
         $session->set('key', 'value');
-		$session->commit(); // Commit to mark as changed
-		$result = $session->write($sessionId, '');
+        $session->commit(); // Commit to mark as changed
+        $result = $session->write($sessionId, '');
         $this->assertTrue($result);
     }
 
-	public function testGetAll(): void
-	{
-		$session = new Session([
-			'save_path' => $this->tempDir,
-			'encryption_key' => null,
-			'auto_commit' => false,
-			'start_session' => false,
-			'test_mode' => true
-		]);
+    public function testGetAll(): void
+    {
+        $session = new Session([
+            'save_path' => $this->tempDir,
+            'encryption_key' => null,
+            'auto_commit' => false,
+            'start_session' => false,
+            'test_mode' => true
+        ]);
 
-		$session->set('key1', 'value1');
-		$session->set('key2', 'value2');
+        $session->set('key1', 'value1');
+        $session->set('key2', 'value2');
 
-		$expectedData = [
-			'key1' => 'value1',
-			'key2' => 'value2'
-		];
+        $expectedData = [
+            'key1' => 'value1',
+            'key2' => 'value2'
+        ];
 
-		$this->assertEquals($expectedData, $session->getAll());
-	}
-
+        $this->assertEquals($expectedData, $session->getAll());
+    }
 }
