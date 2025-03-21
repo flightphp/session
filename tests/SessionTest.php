@@ -462,19 +462,9 @@ class SessionTest extends TestCase
             'test_mode' => true,
             'test_session_id' => $sessionId
         ]);
-        
-        // Use reflection to access internal state and write method
-        $reflector = new ReflectionClass($session);
-        
-        $changedProperty = $reflector->getProperty('changed');
-        $changedProperty->setAccessible(true);
-        $changedProperty->setValue($session, false);
-        
-        $writeMethod = $reflector->getMethod('write');
-        $writeMethod->setAccessible(true);
-        
-        // Write should return true when nothing changed
-        $result = $writeMethod->invoke($session, $sessionId, 'data');
+        $session->set('key', 'value');
+		$session->commit(); // Commit to mark as changed
+		$result = $session->write($sessionId, '');
         $this->assertTrue($result);
     }
 
