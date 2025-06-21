@@ -21,6 +21,7 @@ class Session implements SessionHandlerInterface
     private bool $autoCommit = true;
     private bool $testMode = false;
     private bool $inRegenerate = false;
+    private ?string $serialization = null; // 'json' (default) or 'php'
 
     /**
      * Constructor to initialize the session handler.
@@ -41,6 +42,11 @@ class Session implements SessionHandlerInterface
         $this->autoCommit = $config['auto_commit'] ?? true;
         $startSession = $config['start_session'] ?? true;
         $this->testMode = $config['test_mode'] ?? false;
+        $this->serialization = $config['serialization'] ?? 'json'; // 'json' (default) or 'php'
+
+        if (!in_array($this->serialization, ['json', 'php'], true)) {
+            throw new \InvalidArgumentException("Invalid serialization method: {$this->serialization}. Use 'json' or 'php'.");
+        }
 
         // Set test session ID if provided
         if ($this->testMode === true && isset($config['test_session_id'])) {
@@ -138,47 +144,60 @@ class Session implements SessionHandlerInterface
         $this->sessionId = $id;
         $file = $this->getSessionFile($id);
 
-        // Fail fast: no file exists
-        if (file_exists($file) === false) {
+        if (file_exists($file) !== true) {
             $this->data = [];
-            return '';  // Return empty string for new sessions
+            return '';
         }
 
-        // Fail fast: unable to read file or empty content
         $content = file_get_contents($file);
         if ($content === false || strlen($content) < 1) {
             $this->data = [];
             return '';
         }
 
-        // Extract prefix and data
         $prefix = $content[0];
         $dataStr = substr($content, 1);
 
-        // Handle plain data (no encryption)
-        if ($prefix === 'P' && $this->encryptionKey === null) {
-            $unserialized = unserialize($dataStr);
-            if ($unserialized !== false) {
-                $this->data = $unserialized;
-                return '';  // Return empty string to let PHP handle serialization
-            }
-        }
-
-        // Handle encrypted data
-        if ($prefix === 'E' && $this->encryptionKey !== null) {
+        if ($this->serialization === 'json') {
+            if ($prefix === 'J' && $this->encryptionKey === null) {
+                $decoded = json_decode($dataStr, true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    $this->data = $decoded;
+                    return '';
+                }
+            } elseif ($prefix === 'F' && $this->encryptionKey !== null) {
                 $iv = substr($dataStr, 0, 16);
                 $encrypted = substr($dataStr, 16);
                 $decrypted = openssl_decrypt($encrypted, 'AES-256-CBC', $this->encryptionKey, 0, $iv);
-
-            if ($decrypted !== false) {
-                $unserialized = unserialize($decrypted);
+                if ($decrypted !== false) {
+                    $decoded = json_decode($decrypted, true);
+                    if (json_last_error() === JSON_ERROR_NONE) {
+                        $this->data = $decoded;
+                        return '';
+                    }
+                }
+            }
+        } elseif ($this->serialization === 'php') {
+            if ($prefix === 'P' && $this->encryptionKey === null) {
+                $unserialized = unserialize($dataStr);
                 if ($unserialized !== false) {
                     $this->data = $unserialized;
                     return '';
                 }
+            } elseif ($prefix === 'E' && $this->encryptionKey !== null) {
+                $iv = substr($dataStr, 0, 16);
+                $encrypted = substr($dataStr, 16);
+                $decrypted = openssl_decrypt($encrypted, 'AES-256-CBC', $this->encryptionKey, 0, $iv);
+                if ($decrypted !== false) {
+                    $unserialized = unserialize($decrypted);
+                    if ($unserialized !== false) {
+                        $this->data = $unserialized;
+                        return '';
+                    }
+                }
             }
         }
-        // Fail fast: mismatch between prefix and encryption state or corruption
+        // Fail fast: mismatch or corruption
         $this->data = [];
         return '';
     }
@@ -207,32 +226,46 @@ class Session implements SessionHandlerInterface
      */
     public function write($id, $data): bool
     {
-        // When PHP calls this method, it passes serialized data
-        // We ignore this parameter because we maintain our data internally
-        // and handle serialization ourselves
-
-        // Fail fast: no changes to write
-        if ($this->changed === false && empty($this->data) === false) {
+        if ($this->changed !== true && !empty($this->data)) {
             return true;
         }
 
         $file = $this->getSessionFile($id);
-        $serialized = serialize($this->data);
 
-        // Handle encryption if key is provided
-        if ($this->encryptionKey !== null) {
-            $content = $this->encryptData($serialized);
-
-            // Fail fast: encryption failed
-            if ($content === false) {
-                return false;
+        if ($this->serialization === 'json') {
+            if (!empty($this->data)) {
+                $this->assertNoObjects($this->data);
+            }
+            $serialized = json_encode($this->data);
+            if ($serialized === false) {
+                return false; // @codeCoverageIgnore
+            }
+            if ($this->encryptionKey !== null) {
+                $iv = openssl_random_pseudo_bytes(16);
+                $encrypted = openssl_encrypt($serialized, 'AES-256-CBC', $this->encryptionKey, 0, $iv);
+                if ($encrypted === false) {
+                    return false; // @codeCoverageIgnore
+                }
+                $content = 'F' . $iv . $encrypted;
+            } else {
+                $content = 'J' . $serialized;
+            }
+        } elseif ($this->serialization === 'php') {
+            $serialized = serialize($this->data);
+            if ($this->encryptionKey !== null) {
+                $content = $this->encryptData($serialized); // returns 'E' . $iv . $encrypted
+                if ($content === false) {
+                    return false; // @codeCoverageIgnore
+                }
+            } else {
+                $content = 'P' . $serialized;
             }
         } else {
-            $content = 'P' . $serialized;
+            // Should never happen
+            return false; // @codeCoverageIgnore
         }
 
-        // Write to file and return success
-        return file_put_contents($file, $content) !== false;
+        return file_put_contents($file, $content) !== false; // @codeCoverageIgnore
     }
 
     /**
@@ -429,5 +462,27 @@ class Session implements SessionHandlerInterface
     private function getSessionFile(string $id): string
     {
         return $this->savePath . '/' . $this->prefix . $id;
+    }
+
+    /**
+     * Recursively check for objects in data (for JSON safety).
+     * Throws exception if object is found.
+     * @param mixed $data
+     * @throws \InvalidArgumentException
+     */
+    private function assertNoObjects($data): void
+    {
+        // Iterative stack to avoid recursion
+        $stack = [$data];
+        while ($stack) {
+            $current = array_pop($stack);
+            foreach ($current as $v) {
+                if (is_object($v) === true) {
+                    throw new \InvalidArgumentException('Session data contains an object, which cannot be safely stored with JSON serialization.');
+                } elseif (is_array($v) === true) {
+                    $stack[] = $v;
+                }
+            }
+        }
     }
 }
