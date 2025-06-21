@@ -431,7 +431,8 @@ class SessionTest extends TestCase
                     'save_path' => $this->tempDir,
                     'encryption_key' => 'invalid_key_for_test',
                     'test_mode' => true,
-                    'test_session_id' => $sessionId
+                    'test_session_id' => $sessionId,
+                    'serialization' => 'php'
                 ]
             ])
             ->onlyMethods(['encryptData'])
@@ -490,5 +491,251 @@ class SessionTest extends TestCase
         ];
 
         $this->assertEquals($expectedData, $session->getAll());
+    }
+
+    /**
+     * Test reading and writing session data with JSON serialization (default, no encryption).
+     */
+    public function testReadWriteJsonDefault(): void
+    {
+        $sessionId = 'json_default_id';
+        $session1 = new Session([
+            'save_path' => $this->tempDir,
+            'auto_commit' => false,
+            'start_session' => false,
+            'test_mode' => true,
+            'test_session_id' => $sessionId
+        ]);
+        $session1->set('foo', 'bar');
+        $session1->commit();
+
+        $sessionFile = $this->tempDir . '/sess_' . $sessionId;
+        $fileContents = file_get_contents($sessionFile);
+        $this->assertSame('J', $fileContents[0]);
+        $data = json_decode(substr($fileContents, 1), true);
+        $this->assertEquals(['foo' => 'bar'], $data);
+
+        $session2 = new Session([
+            'save_path' => $this->tempDir,
+            'auto_commit' => false,
+            'start_session' => false,
+            'test_mode' => true,
+            'test_session_id' => $sessionId
+        ]);
+        $this->assertEquals('bar', $session2->get('foo'));
+    }
+
+    /**
+     * Test reading and writing session data with JSON serialization and encryption.
+     */
+    public function testReadWriteJsonWithEncryption(): void
+    {
+        $sessionId = 'json_enc_id';
+        $session1 = new Session([
+            'save_path' => $this->tempDir,
+            'encryption_key' => $this->encryptionKey,
+            'auto_commit' => false,
+            'start_session' => false,
+            'test_mode' => true,
+            'test_session_id' => $sessionId
+        ]);
+        $session1->set('foo', 'secret');
+        $session1->commit();
+
+        $sessionFile = $this->tempDir . '/sess_' . $sessionId;
+        $fileContents = file_get_contents($sessionFile);
+        $this->assertSame('F', $fileContents[0]);
+        $iv = substr($fileContents, 1, 16);
+        $encrypted = substr($fileContents, 17);
+        $decrypted = openssl_decrypt($encrypted, 'AES-256-CBC', $this->encryptionKey, 0, $iv);
+        $this->assertNotFalse($decrypted);
+        $data = json_decode($decrypted, true);
+        $this->assertEquals(['foo' => 'secret'], $data);
+        // Ensure encrypted data is not trivially readable
+        $this->assertStringNotContainsString('secret', $encrypted);
+
+        $session2 = new Session([
+            'save_path' => $this->tempDir,
+            'encryption_key' => $this->encryptionKey,
+            'auto_commit' => false,
+            'start_session' => false,
+            'test_mode' => true,
+            'test_session_id' => $sessionId
+        ]);
+        $this->assertEquals('secret', $session2->get('foo'));
+    }
+
+    /**
+     * Test reading and writing session data with PHP serialization (legacy, no encryption).
+     */
+    public function testReadWritePhpSerialization(): void
+    {
+        $sessionId = 'php_plain_id';
+        $session1 = new Session([
+            'save_path' => $this->tempDir,
+            'serialization' => 'php',
+            'auto_commit' => false,
+            'start_session' => false,
+            'test_mode' => true,
+            'test_session_id' => $sessionId
+        ]);
+        $session1->set('foo', 'bar');
+        $session1->commit();
+
+        $sessionFile = $this->tempDir . '/sess_' . $sessionId;
+        $fileContents = file_get_contents($sessionFile);
+        $this->assertSame('P', $fileContents[0]);
+        $data = unserialize(substr($fileContents, 1));
+        $this->assertEquals(['foo' => 'bar'], $data);
+
+        $session2 = new Session([
+            'save_path' => $this->tempDir,
+            'serialization' => 'php',
+            'auto_commit' => false,
+            'start_session' => false,
+            'test_mode' => true,
+            'test_session_id' => $sessionId
+        ]);
+        $this->assertEquals('bar', $session2->get('foo'));
+    }
+
+    /**
+     * Test reading and writing session data with PHP serialization and encryption (legacy).
+     */
+    public function testReadWritePhpWithEncryption(): void
+    {
+        $sessionId = 'php_enc_id';
+        $session1 = new Session([
+            'save_path' => $this->tempDir,
+            'serialization' => 'php',
+            'encryption_key' => $this->encryptionKey,
+            'auto_commit' => false,
+            'start_session' => false,
+            'test_mode' => true,
+            'test_session_id' => $sessionId
+        ]);
+        $session1->set('foo', 'secret');
+        $session1->commit();
+
+        $sessionFile = $this->tempDir . '/sess_' . $sessionId;
+        $fileContents = file_get_contents($sessionFile);
+        $this->assertSame('E', $fileContents[0]);
+        $iv = substr($fileContents, 1, 16);
+        $encrypted = substr($fileContents, 17);
+        $decrypted = openssl_decrypt($encrypted, 'AES-256-CBC', $this->encryptionKey, 0, $iv);
+        $this->assertNotFalse($decrypted);
+        $data = unserialize($decrypted);
+        $this->assertEquals(['foo' => 'secret'], $data);
+        // Ensure encrypted data is not trivially readable
+        $this->assertStringNotContainsString('secret', $encrypted);
+
+        $session2 = new Session([
+            'save_path' => $this->tempDir,
+            'serialization' => 'php',
+            'encryption_key' => $this->encryptionKey,
+            'auto_commit' => false,
+            'start_session' => false,
+            'test_mode' => true,
+            'test_session_id' => $sessionId
+        ]);
+        $this->assertEquals('secret', $session2->get('foo'));
+    }
+
+    /**
+     * Test that storing an object with JSON serialization throws an exception.
+     */
+    public function testJsonSerializationRejectsObjects(): void
+    {
+        $session = new Session([
+            'save_path' => $this->tempDir,
+            'auto_commit' => false,
+            'start_session' => false,
+            'test_mode' => true,
+            'test_session_id' => 'json_obj_id'
+        ]);
+        $this->expectException(\InvalidArgumentException::class);
+        $session->set('obj', new \stdClass());
+        $session->commit();
+    }
+
+    public function testInvalidSerializationThrows(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new Session([
+            'save_path' => $this->tempDir,
+            'serialization' => 'invalid',
+            'test_mode' => true
+        ]);
+    }
+
+    public function testRegenerateInTestModeChangesId(): void
+    {
+        $session = new Session([
+            'save_path' => $this->tempDir,
+            'test_mode' => true
+        ]);
+        $oldId = $session->id();
+        $session->regenerate();
+        $newId = $session->id();
+        $this->assertNotEquals($oldId, $newId);
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{32}$/', $newId);
+    }
+
+    public function testAssertNoObjectsWithDeepArrayNoObjects(): void
+    {
+        $session = new \flight\Session([
+            'save_path' => $this->tempDir,
+            'test_mode' => true
+        ]);
+        // Should not throw
+        $session->set('deep', [[['foo' => 'bar'], ['baz' => 123]], []]);
+        $session->commit();
+        $this->assertEquals([[['foo' => 'bar'], ['baz' => 123]], []], $session->get('deep'));
+    }
+
+    public function testAssertNoObjectsWithObjectNested(): void
+    {
+        $session = new \flight\Session([
+            'save_path' => $this->tempDir,
+            'test_mode' => true
+        ]);
+        $nested = [[['foo' => new \stdClass()]]];
+        $this->expectException(\InvalidArgumentException::class);
+        $session->set('deep', $nested);
+        $session->commit();
+    }
+
+    public function testAssertNoObjectsWithEmptyArray(): void
+    {
+        $session = new \flight\Session([
+            'save_path' => $this->tempDir,
+            'test_mode' => true
+        ]);
+        $session->set('empty', []);
+        $session->commit();
+        $this->assertEquals([], $session->get('empty'));
+    }
+
+    public function testAssertNoObjectsWithObjectInMixedArray(): void
+    {
+        $session = new \flight\Session([
+            'save_path' => $this->tempDir,
+            'test_mode' => true
+        ]);
+        $mixed = ['a' => 1, 'b' => [2, new \stdClass()]];
+        $this->expectException(\InvalidArgumentException::class);
+        $session->set('mixed', $mixed);
+        $session->commit();
+    }
+
+    public function testAssertNoObjectsWithPrimitive(): void
+    {
+        $session = new \flight\Session([
+            'save_path' => $this->tempDir,
+            'test_mode' => true
+        ]);
+        $session->set('primitive', 42);
+        $session->commit();
+        $this->assertEquals(42, $session->get('primitive'));
     }
 }
