@@ -330,6 +330,94 @@ class Session implements SessionHandlerInterface
     }
 
     /**
+     * Create a new session ID.
+     *
+     * Called by PHP when a new ID is needed (new session, rejected ID under
+     * session.use_strict_mode, or session_regenerate_id()). The format matches
+     * PHP's default php_session_create_id() generator: session.sid_length
+     * characters encoded with session.sid_bits_per_character.
+     *
+     * Do not call session_create_id() from this method. When a session is
+     * already active, that function can delegate back to the save handler's
+     * create_sid() and recurse.
+     *
+     * @return string A new session ID
+     * @see https://www.php.net/manual/en/class.sessionidinterface.php
+     */
+    // phpcs:ignore PSR1.Methods.CamelCapsMethodName.NotCamelCaps -- required by PHP's session handler API
+    public function create_sid(): string
+    {
+        return $this->generateSessionId(
+            (int) ini_get('session.sid_length'),
+            (int) ini_get('session.sid_bits_per_character')
+        );
+    }
+
+    /**
+     * Validate that a session ID already exists in storage.
+     *
+     * Called by PHP when session.use_strict_mode is enabled. This library
+     * already starts sessions with use_strict_mode enabled. Returning false
+     * causes PHP to issue a new ID via create_sid().
+     *
+     * @param string $id The session ID to validate
+     * @return bool True if a session file for this ID exists
+     * @see https://www.php.net/manual/en/sessionupdatetimestamphandlerinterface.validateid.php
+     */
+    public function validateId(string $id): bool
+    {
+        if ($id === '') {
+            return false;
+        }
+
+        return file_exists($this->getSessionFile($id));
+    }
+
+    /**
+     * Generate a session ID using PHP's bin_to_readable algorithm.
+     *
+     * @param int $length Desired ID length (session.sid_length; valid 22-256)
+     * @param int $bits Bits per character (session.sid_bits_per_character; 4-6)
+     * @return string A new session ID
+     */
+    private function generateSessionId(int $length, int $bits): string
+    {
+        if ($length < 22 || $length > 256) {
+            $length = 32;
+        }
+        if ($bits < 4 || $bits > 6) {
+            $bits = 4;
+        }
+
+        // Read $length random bytes, same as php_session_create_id() in php-src.
+        $random = random_bytes($length);
+        $hexconvtab = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ,-';
+        $out = '';
+        $p = 0;
+        $w = 0;
+        $have = 0;
+        $mask = (1 << $bits) - 1;
+        $inLen = strlen($random);
+
+        for ($i = 0; $i < $length; $i++) {
+            if ($have < $bits) {
+                if ($p < $inLen) {
+                    $w |= (ord($random[$p]) << $have);
+                    $p++;
+                    $have += 8;
+                } else {
+                    break;
+                }
+            }
+            $out .= $hexconvtab[$w & $mask];
+            $w >>= $bits;
+            $have -= $bits;
+        }
+
+        return $out;
+    }
+
+    /**
      * Sets a session variable.
      *
      * @param string $key The name of the session variable.
