@@ -330,6 +330,45 @@ class Session implements SessionHandlerInterface
     }
 
     /**
+     * Create a new session ID.
+     *
+     * Called by PHP when a new ID is needed (new session, rejected ID under
+     * session.use_strict_mode, or session_regenerate_id()).
+     *
+     * Do not call session_create_id() from this method. When a session is
+     * already active, that function can delegate back to the save handler's
+     * create_sid() and recurse.
+     *
+     * @return string A new session ID
+     * @see https://www.php.net/manual/en/class.sessionidinterface.php
+     */
+    // phpcs:ignore PSR1.Methods.CamelCapsMethodName.NotCamelCaps -- required by PHP's session handler API
+    public function create_sid(): string
+    {
+        return bin2hex(random_bytes(16));
+    }
+
+    /**
+     * Validate that a session ID already exists in storage.
+     *
+     * Called by PHP when session.use_strict_mode is enabled. This library
+     * already starts sessions with use_strict_mode enabled. Returning false
+     * causes PHP to issue a new ID via create_sid().
+     *
+     * @param string $id The session ID to validate
+     * @return bool True if a session file for this ID exists
+     * @see https://www.php.net/manual/en/sessionupdatetimestamphandlerinterface.validateid.php
+     */
+    public function validateId(string $id): bool
+    {
+        if ($id === '') {
+            return false;
+        }
+
+        return file_exists($this->getSessionFile($id));
+    }
+
+    /**
      * Sets a session variable.
      *
      * @param string $key The name of the session variable.
