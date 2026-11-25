@@ -4,7 +4,6 @@ namespace tests;
 
 use flight\Session;
 use PHPUnit\Framework\TestCase;
-use ReflectionClass;
 
 class SessionCreateSidTest extends TestCase
 {
@@ -70,27 +69,12 @@ class SessionCreateSidTest extends TestCase
         ]);
     }
 
-    /**
-     * Allowed characters for a given session.sid_bits_per_character value.
-     */
-    private function charsetForBits(int $bits): string
-    {
-        $tab = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ,-';
-        return substr($tab, 0, 1 << $bits);
-    }
-
-    public function testCreateSidMatchesRuntimeIniFormat(): void
+    public function testCreateSidReturns32CharHex(): void
     {
         $session = $this->makeSession();
-        $length = (int) ini_get('session.sid_length');
-        $bits = (int) ini_get('session.sid_bits_per_character');
         $id = $session->create_sid();
 
-        $this->assertSame($length, strlen($id));
-        $this->assertMatchesRegularExpression(
-            '/^[' . preg_quote($this->charsetForBits($bits), '/') . ']+$/',
-            $id
-        );
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $id);
     }
 
     public function testCreateSidReturnsUniqueIds(): void
@@ -101,44 +85,6 @@ class SessionCreateSidTest extends TestCase
             $ids[] = $session->create_sid();
         }
         $this->assertSame(count($ids), count(array_unique($ids)));
-    }
-
-    public function testGenerateSessionIdHonorsSixBitEncodingAndCustomLength(): void
-    {
-        $session = $this->makeSession();
-        $method = (new ReflectionClass($session))->getMethod('generateSessionId');
-        $method->setAccessible(true);
-
-        $id = $method->invoke($session, 40, 6);
-        $this->assertSame(40, strlen($id));
-        $this->assertMatchesRegularExpression('/^[0-9a-zA-Z,-]+$/', $id);
-    }
-
-    public function testGenerateSessionIdHonorsFiveBitEncoding(): void
-    {
-        $session = $this->makeSession();
-        $method = (new ReflectionClass($session))->getMethod('generateSessionId');
-        $method->setAccessible(true);
-
-        $id = $method->invoke($session, 32, 5);
-        $this->assertSame(32, strlen($id));
-        $this->assertMatchesRegularExpression('/^[0-9a-v]+$/', $id);
-    }
-
-    public function testGenerateSessionIdFallsBackForInvalidParameters(): void
-    {
-        $session = $this->makeSession();
-        $reflection = new ReflectionClass($session);
-        $method = $reflection->getMethod('generateSessionId');
-        $method->setAccessible(true);
-
-        $tooShort = $method->invoke($session, 10, 3);
-        $this->assertSame(32, strlen($tooShort));
-        $this->assertMatchesRegularExpression('/^[0-9a-f]+$/', $tooShort);
-
-        $tooLong = $method->invoke($session, 300, 9);
-        $this->assertSame(32, strlen($tooLong));
-        $this->assertMatchesRegularExpression('/^[0-9a-f]+$/', $tooLong);
     }
 
     public function testValidateIdReturnsFalseForEmptyOrUnknownId(): void
@@ -195,5 +141,70 @@ class SessionCreateSidTest extends TestCase
         $this->assertStringNotContainsString('create_sid()', $stderr);
         $this->assertStringNotContainsString('validateId()', $stderr);
         $this->assertStringNotContainsString('missing the', $stderr);
+    }
+
+    /**
+     * Under use_strict_mode (as the library starts sessions), an unknown
+     * attacker-chosen ID must be rejected and replaced.
+     */
+    public function testStrictModeRejectsUnknownSessionId(): void
+    {
+        $src = realpath(__DIR__ . '/../src/Session.php');
+        $this->assertNotFalse($src);
+
+        $unknownId = '0123456789abcdef0123456789abcdef';
+        $script = <<<'PHP'
+require $argv[1];
+$unknownId = $argv[2];
+$savePath = $argv[3];
+if (is_dir($savePath) === false) {
+    mkdir($savePath, 0700, true);
+}
+session_id($unknownId);
+$session = new flight\Session([
+    'save_path' => $savePath,
+    'auto_commit' => false,
+    'start_session' => true,
+    'test_mode' => false
+]);
+$newId = (string) $session->id();
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_abort();
+}
+echo json_encode(['unknown' => $unknownId, 'new' => $newId]);
+PHP;
+
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        $cmd = [
+            PHP_BINARY,
+            '-d',
+            'display_errors=1',
+            '-d',
+            'error_reporting=E_ALL',
+            '-r',
+            $script,
+            $src,
+            $unknownId,
+            $this->tempDir,
+        ];
+        $process = proc_open($cmd, $descriptorSpec, $pipes);
+        $this->assertIsResource($process);
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $status = proc_close($process);
+
+        $this->assertSame(0, $status, $stderr);
+        $payload = json_decode($stdout, true);
+        $this->assertIsArray($payload, $stdout . $stderr);
+        $this->assertNotSame($unknownId, $payload['new']);
+        $this->assertNotSame('', $payload['new']);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $payload['new']);
     }
 }
